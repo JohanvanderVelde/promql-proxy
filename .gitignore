@@ -1,0 +1,4 @@
+promql-proxy
+deploy/kube-prometheus-stack-values.yaml
+deploy/prometheus-basic-auth-secret.yaml
+deploy/patch-probes.json
