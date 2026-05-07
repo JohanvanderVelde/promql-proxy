@@ -22,15 +22,31 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       volumes:
-        - name: upstream-auth
+        - name: upstream-tls
           secret:
-            secretName: promql-proxy-upstream-auth
+            secretName: ca-certificates
       containers:
         - name: promql-proxy
           image: localhost/promql-proxy:latest
           imagePullPolicy: Never
+          env:
+            - name: UPSTREAM
+              valueFrom:
+                secretKeyRef:
+                  name: promql-proxy-upstream-auth
+                  key: upstream
+            - name: UPSTREAM_BASIC_AUTH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: promql-proxy-upstream-auth
+                  key: upstream-basic-auth-username
+            - name: UPSTREAM_BASIC_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: promql-proxy-upstream-auth
+                  key: upstream-basic-auth-password
           args:
-            - --upstream=http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+            - --upstream=$(UPSTREAM)
             - --listen-address=:8080
             - --metrics-address=:9090
             - --header-name=X-Forwarded-User
@@ -39,11 +55,12 @@ spec:
             - --rbac-resource=pods
             - --rbac-api-group=metrics.k8s.io
             - --rbac-verb=get
-            - --upstream-basic-auth-username=promql-proxy
-            - --upstream-basic-auth-password-file=/etc/promql-proxy/auth/password
+            - --upstream-basic-auth-username=$(UPSTREAM_BASIC_AUTH_USERNAME)
+            - --upstream-basic-auth-password=$(UPSTREAM_BASIC_AUTH_PASSWORD)
+            - --upstream-tls-ca-file=/etc/promql-proxy/tls/ca.crt
           volumeMounts:
-            - name: upstream-auth
-              mountPath: /etc/promql-proxy/auth
+            - name: upstream-tls
+              mountPath: /etc/promql-proxy/tls
               readOnly: true
           ports:
             - name: http

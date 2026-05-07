@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"flag"
 	"fmt"
@@ -43,6 +45,11 @@ func main() {
 		upstreamBearerTokenFile = flag.String("upstream-bearer-token-file", "", "Path to file containing bearer token for upstream")
 		upstreamBasicAuthUser   = flag.String("upstream-basic-auth-username", "", "Username for upstream basic auth")
 		upstreamBasicAuthPwFile = flag.String("upstream-basic-auth-password-file", "", "Path to file containing password for upstream basic auth")
+
+		// Upstream TLS
+		upstreamCAFile   = flag.String("upstream-tls-ca-file", "", "Path to CA certificate for upstream TLS verification")
+		upstreamCertFile = flag.String("upstream-tls-cert-file", "", "Path to client certificate for upstream mTLS")
+		upstreamKeyFile  = flag.String("upstream-tls-key-file", "", "Path to client key for upstream mTLS")
 	)
 	flag.Parse()
 
@@ -57,6 +64,17 @@ func main() {
 	if err != nil {
 		logger.Error("invalid upstream URL", "error", err)
 		os.Exit(1)
+	}
+
+	// Configure upstream TLS
+	if *upstreamCAFile != "" || *upstreamCertFile != "" {
+		tlsConfig, err := buildUpstreamTLSConfig(*upstreamCAFile, *upstreamCertFile, *upstreamKeyFile)
+		if err != nil {
+			logger.Error("failed to configure upstream TLS", "error", err)
+			os.Exit(1)
+		}
+		http.DefaultTransport.(*http.Transport).TLSClientConfig = tlsConfig
+		logger.Info("upstream TLS configured")
 	}
 
 	// Kubernetes client
@@ -220,4 +238,35 @@ func buildUpstreamAuthHeader(bearerTokenFile, basicUser, basicPwFile string) (st
 	}
 
 	return "", nil
+}
+
+// buildUpstreamTLSConfig constructs a tls.Config from the provided CA and
+// client certificate files.
+func buildUpstreamTLSConfig(caFile, certFile, keyFile string) (*tls.Config, error) {
+	tlsConfig := &tls.Config{}
+
+	if caFile != "" {
+		caCert, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, fmt.Errorf("reading CA file: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse CA certificate from %s", caFile)
+		}
+		tlsConfig.RootCAs = pool
+	}
+
+	if certFile != "" {
+		if keyFile == "" {
+			return nil, fmt.Errorf("--upstream-tls-key-file is required when --upstream-tls-cert-file is set")
+		}
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return nil, fmt.Errorf("loading client certificate: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{cert}
+	}
+
+	return tlsConfig, nil
 }
